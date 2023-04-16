@@ -1,38 +1,48 @@
 # AWS Architecture Diagram
 
 ```mermaid
-graph TD;
-  subgraph Ingestion Layer
-    PubSub[Public Endpoint]
-    ALB[Application Load Balancer]
-    ECS[ECS Cluster]
-    Fargate[ECS Fargate Task]
-    Kinesis[Kinesis Data Stream]
-    subgraph Availability Zone 1
-      Kinesis1[Kinesis Shard 1]
-      Kinesis2[Kinesis Shard 2]
-      Kinesis3[Kinesis Shard 3]
-    end
-    subgraph Availability Zone 2
-      Kinesis4[Kinesis Shard 4]
-      Kinesis5[Kinesis Shard 5]
-      Kinesis6[Kinesis Shard 6]
-    end
+graph LR
+subgraph "Ingestion Layer"
+  LB[Load Balancer]
+  subgraph "Auto Scaling Group"
+    ASG[Auto Scaling Group]
+    EC2-1[EC2 Instance 1]
+    EC2-2[EC2 Instance 2]
   end
-  subgraph Consumption Layer
-    Lambda[Lambda Function]
-    DynamoDB[DynamoDB Table]
+  LB --> ASG
+end
+
+subgraph "Data Processing Layer"
+  KIN[Kinesis Data Stream]
+  subgraph "Consumer Group 1"
+    FARG[ECS Fargate Task]
+    JAV[Java Batch Job]
   end
-  subgraph Internal Systems
-    BatchJob[Batch Job]
+  subgraph "Consumer Group 2"
+    LAMB[Lambda Function]
+    NJS[NodeJS Function]
   end
-  subgraph Users
-    Users[Users Worldwide]
-  end
-  Users--HTTPs-->PubSub
-  PubSub--HTTPs-->ALB
-  ALB--HTTP-->ECS
-  ECS--HTTP-->Fargate
-  Fargate--KPL-->Kinesis
-  Kinesis--Lambda-->DynamoDB
-  Kinesis--BatchJob-->S3
+  KIN --> FARG
+  FARG --> JAV
+  KIN --> LAMB
+  LAMB --> NJS
+end
+
+subgraph "Data Storage Layer"
+  S3[S3 Bucket]
+  DDB[ DynamoDB Table]
+  KIN --- S3
+  KIN --- DDB
+end
+
+subgraph "Global Traffic"
+  DNS[Route 53 DNS]
+  CDN[Amazon CloudFront]
+  LB --- CDN
+  CDN --- DNS
+end
+
+subgraph "Security"
+  CERT[SSL Certificate]
+  CERT --- LB
+end
