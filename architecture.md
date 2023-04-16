@@ -1,47 +1,65 @@
 # AWS Architecture Diagram
 
 ```mermaid
-flowchart TD
-  subgraph "Public Internet"
-    end1[Public Endpoint]
+flowchart LR
+
+subgraph "Public Internet"
+  PubEP("Public Endpoint") --> ALB
+end
+
+subgraph "AWS"
+  subgraph "Load Balancer"
+    ALB[ALB]
   end
-
-  subgraph "Amazon VPC"
-    subgraph "Public Subnet"
-      LB[ALB]
-      TG[NODEJS Lambda]
-      end2((Endpoint))
-    end
-
-    subgraph "Private Subnet"
-      subgraph "ECS Cluster"
-        ECS1[ECS Fargate Task]
-        ECS2[ECS Fargate Task]
-      end
-    end
-
-    DB[RDS]
-
-    subgraph "AWS PrivateLink"
-      PL(PrivateLink Interface)
-      end3((Endpoint))
-    end
-
-    subgraph "AWS Global Accelerator"
-      GA[Global Accelerator]
-    end
-
-    subgraph "Amazon S3"
-      S3[S3 Bucket]
-    end
-
-    end1-->LB
-    LB-->TG
-    end2-->LB
-    TG-->DB
-    ECS1-->DB
-    ECS2-->DB
-    DB-->PL
-    PL-->GA
-    GA-->S3
-    S3-->end3
+  
+  subgraph "Auto Scaling Group"
+    ASG[ASG]
+  end
+  
+  subgraph "Elasticache Cluster"
+    ElastiCache
+  end
+  
+  subgraph "Kinesis Data Stream"
+    Kinesis
+  end
+  
+  subgraph "S3 Bucket"
+    S3
+  end
+  
+  subgraph "Lambda Function"
+    Lambda
+  end
+  
+  subgraph "Batch Job"
+    BatchJob
+  end
+  
+  subgraph "ECS Fargate Task"
+    ECS
+  end
+  
+  subgraph "Internal Systems"
+    InternalSystems
+  end
+  
+  subgraph "CloudWatch"
+    CloudWatch
+  end
+  
+  ALB --> ASG
+  ASG --> ElastiCache
+  ASG --> Kinesis
+  ASG --> S3
+  Kinesis --> Lambda
+  Lambda --> InternalSystems
+  Lambda --> S3
+  BatchJob --> ECS
+  ECS --> InternalSystems
+  InternalSystems --> CloudWatch
+  ElastiCache --> CloudWatch
+  Kinesis --> CloudWatch
+  S3 --> CloudWatch
+  
+end
