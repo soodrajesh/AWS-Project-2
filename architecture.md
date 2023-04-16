@@ -1,52 +1,48 @@
 # AWS Architecture Diagram
 
 ```mermaid
-flowchart TB
-    subgraph "Public Endpoint"
-        subgraph "ALB"
-            ALB
-        end
-        subgraph "Target Group"
-            Target_Group
-        end
-        subgraph "EC2 instances"
-            EC2_instances
-        end
-        subgraph "Auto Scaling Group"
-            Auto_Scaling_Group
-        end
-        ALB-->"Redirect to HTTPS"-->ALB
-        ALB-->Target_Group
-        Target_Group-->EC2_instances
-        EC2_instances-->Auto_Scaling_Group
+graph TD
+subgraph Public
+  APIGateway((API Gateway))
+  subgraph Availability
+    CloudFront((CloudFront))
+  end
+end
+subgraph Ingestion
+  ALB((ALB))
+  subgraph Autoscaling
+    ECS(ECS)
+    Fargate(Fargate)
+  end
+end
+subgraph Data
+  Kinesis((Kinesis)))
+  subgraph Processing
+    subgraph Real-Time
+      Lambda((Lambda))
     end
-    subgraph "Kinesis Firehose"
-        Kinesis_Firehose
+    subgraph Batch
+      ECS2(ECS)
+      Fargate2(Fargate)
     end
-    subgraph "S3"
-        S3
+  end
+  subgraph Retention
+    subgraph S3
+      S3((S3))
     end
-    subgraph "ECS Fargate Task"
-        ECS_Fargate_Task
+    subgraph DynamoDB
+      DynamoDB((DynamoDB))
     end
-    subgraph "Lambda Function"
-        Lambda_Function
-    end
-    subgraph "Internal Systems"
-        Internal_Systems
-    end
-    subgraph "CloudWatch Events"
-        CloudWatch_Events
-    end
-    
-    subgraph "Worldwide Access"
-        ALB-->|"TLS 1.2"|Kinesis_Firehose
-    end
-    Kinesis_Firehose-->S3
-    S3-->ECS_Fargate_Task
-    S3-->Lambda_Function
-    S3-->Internal_Systems
-    S3-->CloudWatch_Events
-    ECS_Fargate_Task-->|"Java Runtime"|Internal_Systems
-    Lambda_Function-->|"NodeJS Runtime"|Internal_Systems
-    S3-->|"30 Days retention"|Internal_Systems
+  end
+end
+
+APIGateway -- TLS 1.2 --> ALB
+ALB --> ECS
+ECS --> Kinesis
+Kinesis --> Lambda
+Kinesis --> S3
+S3 -- Lifecycle --> DynamoDB
+ECS2 --> Kinesis
+Kinesis --> Fargate
+Fargate --> DynamoDB
+CloudFront --> APIGateway
