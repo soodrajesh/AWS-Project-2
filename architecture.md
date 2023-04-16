@@ -47,8 +47,8 @@ flowchart LR
       lambda-->s3
       fargate-->s3
     end
-    subgraph "AWS CloudFormation"
-      cf["CloudFormation"]
+    subgraph "Terraform for AWS"
+      cf["Terraform"]
     end
     cf-->apigateway
     cf-->nat
