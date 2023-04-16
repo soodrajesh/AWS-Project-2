@@ -36,4 +36,3 @@ graph TD;
   Fargate--KPL-->Kinesis
   Kinesis--Lambda-->DynamoDB
   Kinesis--BatchJob-->S3
-```
