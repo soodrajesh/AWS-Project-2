@@ -2,65 +2,64 @@
 
 ```mermaid
 flowchart LR
-  subgraph "AWS Account"
-    subgraph "Amazon API Gateway"
-      apigateway["API Gateway"]
-    end
-    subgraph "Amazon EC2"
-      nat["NAT Gateway"]
-    end
-    subgraph "Amazon VPC"
-      internet["Internet Gateway"]
-      subgraph "Public Subnet 1"
-        apigateway-->internet
-        nlb1["Network Load Balancer 1"]
-        eip1["Elastic IP 1"]
-        nlb1-->nat
-        nlb1-->eip1
-        sg["Security Group"]
-        instance["Amazon EC2 instance"]
-        sg-->instance
-      end
-      subgraph "Public Subnet 2"
-        nlb2["Network Load Balancer 2"]
-        eip2["Elastic IP 2"]
-        nlb2-->nat
-        nlb2-->eip2
-        sg-->instance
-      end
-      subgraph "Private Subnet"
-        rds["Amazon RDS"]
-        instance-->rds
-        nlb1r["NLB Listener Rule"]
-        nlb1r-->rds
-        nlb2r["NLB Listener Rule"]
-        nlb2r-->rds
-        lambda["AWS Lambda"]
-        lambda-->rds
-        fargate["AWS Fargate"]
-        fargate-->rds
-      end
-    end
-    subgraph "Amazon S3"
-      s3["Amazon S3"]
-      rds-->s3
-      lambda-->s3
-      fargate-->s3
-    end
-    subgraph "Terraform for AWS"
-      cf["Terraform"]
-    end
-    cf-->apigateway
-    cf-->nat
-    cf-->internet
-    cf-->nlb1
-    cf-->nlb2
-    cf-->sg
-    cf-->instance
-    cf-->rds
-    cf-->nlb1r
-    cf-->nlb2r
-    cf-->lambda
-    cf-->fargate
-    cf-->s3
+
+subgraph Ingestion Layer
+  inputEndpoint((Input Endpoint))
+  httpEncrypted[HTTP Encrypted via TLS 1.2]
+  subgraph Load Balancer
+    lb(Load Balancer)
   end
+  subgraph Auto Scaling Group
+    asg(Auto Scaling Group)
+  end
+  db1[Database 1]
+  db2[Database 2]
+end
+
+subgraph Consumption Layer
+  subgraph Batch Processing
+    batchJob((Long-Running Batch Job))
+    ecs(ECS Fargate)
+    batchDB[Database]
+  end
+
+  subgraph Near-Real-Time Processing
+    nrtJob((Near-Real-Time Consumer))
+    lambda(Lambda)
+    nrtDB[Database]
+  end
+end
+
+subgraph Data Storage
+  s3[S3 Bucket]
+end
+
+subgraph Monitoring
+  cloudwatch(CloudWatch)
+  alerts[Alerts]
+end
+
+subgraph Global Content Delivery
+  cdn[CDN]
+end
+
+inputEndpoint-->httpEncrypted-->lb-->asg
+asg-->db1
+asg-->db2
+db1-->s3
+db2-->s3
+
+batchJob-->ecs-->batchDB
+nrtJob-->lambda-->nrtDB
+s3-->batchDB
+s3-->nrtDB
+
+cdn-->inputEndpoint
+
+cloudwatch-->inputEndpoint
+cloudwatch-->asg
+cloudwatch-->batchJob
+cloudwatch-->nrtJob
+
+alerts-->cloudwatch
+
