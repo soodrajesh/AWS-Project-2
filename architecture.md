@@ -8,6 +8,7 @@ subgraph Public
     CloudFront((CloudFront))
   end
 end
+
 subgraph Ingestion
   ALB((ALB))
   subgraph Autoscaling
@@ -15,6 +16,7 @@ subgraph Ingestion
     Fargate(Fargate)
   end
 end
+
 subgraph Data
   Kinesis((Kinesis)))
   subgraph Processing
@@ -26,6 +28,7 @@ subgraph Data
       Fargate2(Fargate)
     end
   end
+  
   subgraph Retention
     subgraph S3
       S3((S3))
