@@ -1,65 +1,85 @@
 # AWS Architecture Diagram
 
 ```mermaid
-flowchart LR
+graph TD;
+    subgraph Data Ingestion
+        I[Internet] --> LB[ALB];
+        LB --> Z[API Gateway];
+        Z --> K[Kinesis Stream];
+        K --> D1[Data Store];
+        K --> D2[Data Store];
+        K --> D3[Data Store];
+        K --> D4[Data Store];
+    end
 
-subgraph Ingestion Layer
-  inputEndpoint((Input Endpoint))
-  httpEncrypted[HTTP Encrypted via TLS 1.2]
-  subgraph Load Balancer
-    lb(Load Balancer)
-  end
-  subgraph Auto Scaling Group
-    asg(Auto Scaling Group)
-  end
-  db1[Database 1]
-  db2[Database 2]
-end
+    subgraph Event Consumption
+        D1 --> E1[Lambda Function];
+        D2 --> E1;
+        D3 --> E1;
+        D4 --> E1;
 
-subgraph Consumption Layer
-  subgraph Batch Processing
-    batchJob((Long-Running Batch Job))
-    ecs(ECS Fargate)
-    batchDB[Database]
-  end
+        E1 --> D5[DynamoDB Table];
 
-  subgraph Near-Real-Time Processing
-    nrtJob((Near-Real-Time Consumer))
-    lambda(Lambda)
-    nrtDB[Database]
-  end
-end
+        D5 --> F1[Fargate Task];
+        D5 --> L1[Lambda Function];
 
-subgraph Data Storage
-  s3[S3 Bucket]
-end
+        F1 --> ECR;
+        ECR --> EC2[EC2 Instance];
+        L1 --> VPC;
+    end
 
-subgraph Monitoring
-  cloudwatch(CloudWatch)
-  alerts[Alerts]
-end
+    subgraph Monitoring
+        CloudWatchLogs1[D1 CloudWatch Logs] --> CloudWatchDashboards1[CloudWatch Dashboards];
+        CloudWatchLogs1[D2 CloudWatch Logs] --> CloudWatchDashboards1;
+        CloudWatchLogs1[D3 CloudWatch Logs] --> CloudWatchDashboards1;
+        CloudWatchLogs1[D4 CloudWatch Logs] --> CloudWatchDashboards1;
+        CloudWatchLogs2[F1 CloudWatch Logs] --> CloudWatchDashboards2[CloudWatch Dashboards];
+        CloudWatchLogs3[L1 CloudWatch Logs] --> CloudWatchDashboards2;
+        CloudWatchLogs4[API Gateway CloudWatch Logs] --> CloudWatchDashboards3[CloudWatch Dashboards];
+    end
 
-subgraph Global Content Delivery
-  cdn[CDN]
-end
+    subgraph Security
+        ACM[ACM Certificates] --> LB;
+        WAF[WAF] --> LB;
+    end
 
-inputEndpoint-->httpEncrypted-->lb-->asg
-asg-->db1
-asg-->db2
-db1-->s3
-db2-->s3
+    subgraph Availability
+        subgraph Multi-AZ
+            EC2 --> S1[Amazon S3];
+            F1 --> S1;
+            L1 --> S1;
+        end
 
-batchJob-->ecs-->batchDB
-nrtJob-->lambda-->nrtDB
-s3-->batchDB
-s3-->nrtDB
+        subgraph Multi-Region
+            D1 --> R1[Kinesis Data Stream in Region 2];
+            D2 --> R1;
+            D3 --> R1;
+            D4 --> R1;
+            R1 --> E1;
+            R1 --> S2[Amazon S3 in Region 2];
+            S1 --> S2;
+        end
 
-cdn-->inputEndpoint
+        LB --> EC2;
+    end
 
-cloudwatch-->inputEndpoint
-cloudwatch-->asg
-cloudwatch-->batchJob
-cloudwatch-->nrtJob
+    subgraph Retention
+        D1 --> R2[S3 Bucket for Event Retention];
+        D2 --> R2;
+        D3 --> R2;
+        D4 --> R2;
+        R2 --> Lifecycle[R2 Object Lifecycle Policy];
+    end
 
-alerts-->cloudwatch
+    subgraph Requirements
+        style LB fill:#ffddcc;
+        style Z fill:#ffffcc;
+        style K fill:#ccffff;
+        style D1,D2,D3,D4 fill:#ccffcc;
+        style E1,L1 fill:#ccccff;
+        style F1 fill:#ddccff;
+        style S1,S2,R2 fill:#ffccdd;
+    end
+
+
 
