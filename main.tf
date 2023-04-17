@@ -1,32 +1,231 @@
-# Define variables
-variable "region" {
-  default = "us-west-2"
+# Define provider
+provider "aws" {
+  region = "us-west-2"
 }
 
-variable "account_id" {
-  default = "094896736008"
+variable "my_subnet" {
+  type        = list(string)
+  default = ["subnet-012345678901", "subnet-012345678902"] #Update the subnet ids as per requirement 
 }
 
-# Create IAM roles
-resource "aws_iam_role" "ingestion" {
-  name = "ingestion_role"
+data "aws_vpc" "default" {
+  default = true
+}
 
+data "aws_subnet_ids" "subnets" {
+  vpc_id = data.aws_vpc.default.id
+}
+
+data "aws_subnet" "subnets" {
+  for_each = data.aws_subnet_ids.subnets.ids
+  id       = each.value
+}
+
+resource "aws_api_gateway_rest_api" "my_api" {
+  name = "my_api"
+}
+
+resource "aws_api_gateway_method" "my_method" {
+  rest_api_id   = aws_api_gateway_rest_api.my_api.id
+  resource_id   = aws_api_gateway_rest_api.my_api.root_resource_id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "my_integration" {
+  rest_api_id = aws_api_gateway_rest_api.my_api.id
+  resource_id = aws_api_gateway_rest_api.my_api.root_resource_id
+  http_method = aws_api_gateway_method.my_method.http_method
+
+  type = "HTTP"
+  uri  = "http://${aws_lb.my-lb.dns_name}"
+}
+
+resource "aws_lb" "my-lb" {
+  name               = "my-lb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.my_security_group.id]
+  subnets            = data.aws_subnet_ids.subnets.ids 
+}
+
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.my-lb.arn
+  port              = "443"
+  protocol          = "HTTPS"
+
+  ssl_policy      = "ELBSecurityPolicy-2016-08"
+  default_action {
+    type             = "forward"
+    }
+}
+
+resource "aws_ecs_cluster" "my_cluster" {
+  name = "my_cluster"
+}
+
+resource "aws_ecs_task_definition" "my-task-def" {
+  family                   = "my-task-def"
+    container_definitions    = jsonencode([{
+    name      = "my_container"
+    image     = "my_image"
+    cpu       = 256
+    memory    = 512
+    essential = true
+  }])
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+}
+
+resource "aws_ecs_service" "my_service" {
+  name            = "my_service"
+  cluster         = aws_ecs_cluster.my_cluster.id
+  task_definition = aws_ecs_task_definition.my-task-def.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    security_groups = [aws_security_group.my_security_group.id]
+    subnets         = data.aws_subnet_ids.subnets.ids 
+  }
+}
+
+resource "aws_kinesis_stream" "my_stream" {
+  name             = "my_stream"
+  shard_count      = 1
+  retention_period = 24
+}
+
+
+resource "aws_sns_topic" "my_topic" {
+  name = "my_topic"
+}
+
+resource "aws_lambda_function" "my_lambda_function" {
+  function_name = "my_lambda_function"
+  handler      = "index.handler"
+  role         = aws_iam_role.lambda_role.arn
+  runtime      = "nodejs14.x"
+  filename     = "real-time-consumer.zip"
+}
+
+resource "aws_cloudwatch_event_rule" "my_rule" {
+  name                = "my_rule"
+  description         = "Run my task at 3 am"
+  schedule_expression = "cron(0 3 * * ? *)"
+}
+
+resource "aws_cloudwatch_event_target" "my_target" {
+  rule      = aws_cloudwatch_event_rule.my_rule.name
+  arn       = aws_ecs_task_definition.my-task-def.arn
+  role_arn  = aws_iam_role.ecs_task_role.arn
+  input     = jsonencode({
+    containerOverrides: [{
+      name: "my_container",
+      command: [
+        "node",
+        "app.js"
+      ]
+    }]
+  })
+}
+
+resource "aws_lambda_permission" "my_permission" {
+  statement_id  = "AllowExecutionFromCloudWatch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.my_lambda_function.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.my_rule.arn
+}
+
+resource "aws_security_group" "my_security_group" {
+  name_prefix = "my_security_group"
+}
+
+resource "aws_instance" "my_instance" {
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = "t2.micro"
+  vpc_security_group_ids = [aws_security_group.my_security_group.id]
+}
+
+
+
+resource "aws_elb" "myelb" {
+  name               = "myelb"
+  security_groups    = [aws_security_group.my_security_group.id]
+  subnets            = data.aws_subnet_ids.subnets.ids 
+  listener {
+    instance_port     = 80
+    instance_protocol = "HTTP"
+    lb_port           = 80
+    lb_protocol       = "HTTP"
+  }
+}
+
+resource "aws_elb_attachment" "my_attachment" {
+  elb    = aws_elb.myelb.id
+  instance = aws_instance.my_instance.id
+}
+
+
+resource "aws_dynamodb_table" "my_table" {
+  name           = "my_table"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "event_id"
+  attribute {
+    name = "event_id"
+    type = "S"
+  }
+}
+
+
+resource "aws_iam_role" "lambda_role" {
+  name = "lambda_role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Action = "sts:AssumeRole"
         Effect = "Allow"
         Principal = {
-          Service = "apigateway.amazonaws.com"
+          Service = "lambda.amazonaws.com"
         }
-        Action = "sts:AssumeRole"
       }
     ]
   })
 }
 
-resource "aws_iam_role" "batch_consumer" {
-  name = "batch_consumer_role"
+
+resource "aws_s3_bucket" "my_bucket" {
+  bucket = "my-bucket"
+  acl    = "private"
+
+  versioning {
+    enabled = true
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "bucket-config" {
+  bucket = aws_s3_bucket.my_bucket.id
+
+  rule {
+    id = "expire-old-events"
+    status  = "Enabled"
+    expiration {
+      days = 30
+    }
+
+    filter {
+      and {
+        prefix = ""
+      }
+    }
+  }
+}
+
+
+resource "aws_iam_role" "ecs_task_role" {
+  name = "ecs_task_role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -42,409 +241,108 @@ resource "aws_iam_role" "batch_consumer" {
   })
 }
 
-resource "aws_iam_role" "real_time_consumer" {
-  name = "real_time_consumer_role"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-}
-
-# Create IAM policies
-resource "aws_iam_policy" "ingestion" {
-  name        = "ingestion_policy"
-  description = "Allows ingesting events from public API"
-  policy      = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow",
-        Action = [
-          "execute-api:Invoke"
-        ],
-        Resource = [
-          "*"
-        ]
-      }
-    ]
-  })
-}
-
-resource "aws_iam_policy" "batch_consumer" {
-  name        = "batch_consumer_policy"
-  description = "Allows batch consuming events from S3"
-  policy      = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow",
-        Action = [
-          "s3:GetObject"
-        ],
-        Resource = [
-          "*"
-        ]
-      }
-    ]
-  })
-}
-
-resource "aws_iam_policy" "real_time_consumer" {
-  name        = "real_time_consumer_policy"
-  description = "Allows real-time consuming events from Kinesis"
-  policy      = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow",
-        Action = [
-          "kinesis:GetShardIterator",
-          "kinesis:GetRecords"
-        ],
-        Resource = [
-          "*"
-        ]
-      }
-    ]
-  })
-}
-
-# Attach IAM policies to roles
-resource "aws_iam_role_policy_attachment" "ingestion" {
-  policy_arn = aws_iam_policy.ingestion.arn
-  role       = aws_iam_role.ingestion.name
-}
-
-resource "aws_iam_role_policy_attachment" "batch_consumer" {
-  policy_arn = aws_iam_policy.batch_consumer.arn
-  role       = aws_iam_role.batch_consumer.name
-}
-
-resource "aws_iam_role_policy_attachment" "real_time_consumer" {
-  policy_arn = aws_iam_policy.real_time_consumer.arn
-  role       = aws_iam_role.real_time_consumer.name
-}
-
-# Create API Gateway
-resource "aws_api_gateway_rest_api" "api" {
-  name = "event_ingestion_api"
-}
-
-resource "aws_api_gateway_resource" "resource" {
-  rest_api_id = aws_api_gateway_rest_api.api.id
-  parent_id   = aws_api_gateway_rest_api.api.root_resource_id
-  path_part   = "{proxy+}"
-}
-
-# Create an API Gateway REST API and deploy it
-resource "aws_api_gateway_rest_api" "events_api" {
-  name        = "events-api"
-  description = "API for ingesting events"
-}
-
-resource "aws_api_gateway_resource" "events_resource" {
-  rest_api_id = aws_api_gateway_rest_api.events_api.id
-  parent_id   = aws_api_gateway_rest_api.events_api.root_resource_id
-  path_part   = "events"
-}
-
-resource "aws_api_gateway_method" "events_method" {
-  rest_api_id   = aws_api_gateway_rest_api.events_api.id
-  resource_id   = aws_api_gateway_resource.events_resource.id
-  http_method   = "POST"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_integration" "events_integration" {
-  rest_api_id          = aws_api_gateway_rest_api.events_api.id
-  resource_id          = aws_api_gateway_resource.events_resource.id
-  http_method          = aws_api_gateway_method.events_method.http_method
-  type                 = "AWS_PROXY"
-  uri                  = aws_lambda_function.real_time_consumer.invoke_arn
-  integration_http_method = "POST"
-}
-
-# resource "aws_api_gateway_deployment" "deployment" {
-#   rest_api_id = aws_api_gateway_rest_api.events_api.id
-#   stage_name  = "prod"
-# }
-
-# Create an S3 bucket to store events
-resource "aws_s3_bucket" "events_bucket" {
-  bucket_prefix = "events-bucket-s3"
-  acl           = "private"
-  lifecycle_rule {
-    id      = "delete-logs"
-    prefix  = "logs/"
-    enabled = true
-
-    expiration {
-      days = 30
-
-#   tags = {
-#     Name        = "events-bucket"
-#     Environment = "production"
-#    }
-  }
- }
-}
-
-
-# Enable server-side encryption on the S3 bucket
-resource "aws_s3_bucket_server_side_encryption_configuration" "events_bucket_encryption" {
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-
-  bucket = aws_s3_bucket.events_bucket.id
-}
-
-# # Create a DynamoDB table to store events
-# resource "aws_dynamodb_table" "events_table" {
-#   name           = "events-table"
-#   billing_mode   = "PAY_PER_REQUEST"
-#   hash_key       = "orderReference"
-#   attribute {
-#     name = "orderReference"
-#     type = "S"
-#   }
-# #   attribute {
-# #     name = "advertiserId"
-# #     type = "N"
-# #   }
-# #   attribute {
-# #     name = "totalamount"
-# #     type = "N"
-# #   }
-# #   attribute {
-# #     name = "currencyCode"
-# #     type = "S"
-# #   }
-
-#   tags = {
-#     Name        = "events-table"
-#     Environment = "production"
-#   }
-# }
-
-# # Create an IAM role for the near-real-time consumer
-# resource "aws_iam_role" "real_time_consumer" {
-#   name = "real-time-consumer-role"
-
-#   assume_role_policy = jsonencode({
-#     Version = "2012-10-17"
-#     Statement = [
-#       {
-#         Effect = "Allow"
-#         Principal = {
-#           Service = "lambda.amazonaws.com"
-#         }
-#         Action = "sts:AssumeRole"
-#       }
-#     ]
-#   })
-# }
-
-# Attach an IAM policy to the role to allow access to CloudWatch Logs
-resource "aws_iam_role_policy_attachment" "real_time_consumer_logs" {
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  role       = aws_iam_role.real_time_consumer.name
-}
-
-# Create a Lambda function for the near-real-time consumer
-resource "aws_lambda_function" "real_time_consumer" {
-  function_name = "real-time-consumer"
-  handler      = "index.handler"
-  runtime      = "nodejs14.x"
-  timeout      = 60
-  memory_size  = 128
-  role         = aws_iam_role.real_time_consumer.arn
-  filename     = "real-time-consumer.zip"
-
-  environment {
-    variables = {
-      BATCH_JOB_QUEUE_URL = aws_sqs_queue.batch_job_queue.url
-    }
-  }
-
-  # Create a new version of the function every time the code is updated
-  lifecycle {
-    create_before_destroy = true
-  }
-
-  # Specify the function's source code
-  source_code_hash = filebase64sha256("real-time-consumer.zip")
-}
-
-# Create a permission that allows the API Gateway to invoke the Lambda function
-resource "aws_lambda_permission" "api_gateway_invoke_real_time_consumer" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.real_time_consumer.function_name
-  principal     = "apigateway.amazonaws.com"
-
-  # Allow the API Gateway to invoke the Lambda function for any resource/method combination
-  source_arn = "${aws_api_gateway_deployment.deployment.execution_arn}/*/*/*"
-}
-
-######
-
-resource "aws_dynamodb_table" "events" {
-  name           = "events"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "advertiserId"
-  range_key      = "orderReference"
-
-  attribute {
-    name = "advertiserId"
-    type = "N"
-  }
-
-  attribute {
-    name = "orderReference"
-    type = "S"
-  }
-}
-
-
-# resource "aws_api_gateway_rest_api" "api" {
-#   name = "order-events-api"
-# }
-
-resource "aws_api_gateway_resource" "root" {
-  rest_api_id = aws_api_gateway_rest_api.api.id
-  parent_id   = aws_api_gateway_rest_api.api.root_resource_id
-  path_part   = "{advertiserId}"
-}
-
-resource "aws_api_gateway_method" "post" {
-  rest_api_id   = aws_api_gateway_rest_api.api.id
-  resource_id   = aws_api_gateway_resource.root.id
-  http_method   = "POST"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_integration" "integration" {
-  rest_api_id             = aws_api_gateway_rest_api.api.id
-  resource_id             = aws_api_gateway_resource.root.id
-  http_method             = aws_api_gateway_method.post.http_method
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.real_time_consumer.arn
-}
-
-resource "aws_api_gateway_deployment" "deployment" {
-  rest_api_id = aws_api_gateway_rest_api.api.id
-  stage_name  = "prod"
-
-  depends_on = [
-    aws_api_gateway_integration.integration,
-  ]
-}
-
-output "api_gateway_endpoint" {
-  value = aws_api_gateway_deployment.deployment.invoke_url
-}
-
-
-resource "aws_lambda_permission" "dynamodb" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.real_time_consumer.function_name
-  principal     = "apigateway.amazonaws.com"
-
-  source_arn = "${aws_api_gateway_deployment.deployment.execution_arn}/*/*/advertiserId/*"
-}
-
-resource "aws_iam_policy" "events" {
-  name = "dynamodb-table-policy"
+resource "aws_iam_policy" "ecs_task_policy" {
+  name = "ecs_task_policy"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid = "AllowLambdaToPutItem"
         Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
         Action = [
-          "dynamodb:PutItem",
-          "dynamodb:BatchWriteItem"
+          "s3:GetObject",
+          "s3:PutObject"
         ]
-        Resource = aws_dynamodb_table.events.arn
+        Resource = [
+          "${aws_s3_bucket.my_bucket.arn}/*"
+        ]
       },
       {
-        Sid = "AllowBatchConsumerToScanTable"
         Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${var.account_id}:role/batch_consumer"
-        }
         Action = [
-          "dynamodb:Scan",
-          "dynamodb:Query"
+          "dynamodb:PutItem",
+          "dynamodb:GetItem",
+          "dynamodb:UpdateItem"
         ]
-        Resource = aws_dynamodb_table.events.arn
+        Resource = [
+          "${aws_dynamodb_table.my_table.arn}"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "sns:Publish"
+        ]
+        Resource = [
+          "${aws_sns_topic.my_topic.arn}"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kinesis:PutRecord"
+        ]
+        Resource = [
+          "${aws_kinesis_stream.my_stream.arn}"
+        ]
       }
     ]
   })
 }
 
-# Define the event queue configuration
-resource "aws_sqs_queue" "batch_job_queue" {
-  name                = "batch_job_queue"
-  delay_seconds       = 0
-  max_message_size    = "262144"
-  message_retention_seconds = "1209600"
+
+resource "aws_iam_role_policy_attachment" "ecs_task_policy_attachment" {
+  policy_arn = aws_iam_policy.ecs_task_policy.arn
+  role       = aws_iam_role.ecs_task_role.name
 }
 
 
-# Grant SNS permissions to send messages to the event queue
-resource "aws_sqs_queue_policy" "batch_job_queue" {
-  queue_url = "${aws_sqs_queue.batch_job_queue.id}"
+resource "aws_cloudwatch_event_rule" "ecs_task_schedule" {
+  name        = "ecs_task_schedule"
+  description = "Schedule the ECS Fargate task to run once per day at 3 am"
 
-  policy = <<POLICY
-{
-  "Version": "2012-10-17",
-  "Id": "sns_policy",
-  "Statement": [
-    {
-      "Sid": "sns_send",
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": "sqs:SendMessage",
-      "Resource": "${aws_sqs_queue.batch_job_queue.arn}",
-      "Condition": {
-        "ArnEquals": {
-          "aws:SourceArn": "${aws_sns_topic.event_topic.arn}"
-        }
-      }
-    }
-  ]
-}
-POLICY
+  schedule_expression = "cron(0 3 * * ? *)"
 }
 
+resource "aws_cloudwatch_event_target" "ecs_task_target" {
+  target_id = "ecs_task_target"
 
-# Create an SNS topic to handle event notifications
-resource "aws_sns_topic" "event_topic" {
-  name = "my-events-topic"
+  rule      = aws_cloudwatch_event_rule.ecs_task_schedule.name
+  arn       = aws_ecs_task_definition.my-task-def.arn
+  role_arn  = aws_iam_role.ecs_task_role.arn
 }
 
-# Create an SNS subscription to send messages to the event queue
-resource "aws_sns_topic_subscription" "event_topic" {
-  topic_arn = aws_sns_topic.event_topic.arn
-  protocol  = "sqs"
-  endpoint  = aws_sqs_queue.batch_job_queue.arn
+output "elb_dns_name" {
+  value = aws_elb.myelb.dns_name
 }
+
+output "kinesis_stream_name" {
+  value = aws_kinesis_stream.my_stream.name
+}
+
+output "sns_topic_arn" {
+  value = aws_sns_topic.my_topic.arn
+}
+
+output "dynamodb_table_name" {
+  value = aws_dynamodb_table.my_table.name
+}
+
+output "ecs_cluster_arn" {
+  value = aws_ecs_cluster.my_cluster.arn
+}
+
+output "ecs_task_definition_arn" {
+  value = aws_ecs_task_definition.my-task-def.arn
+}
+
+output "lambda_function_arn" {
+  value = aws_lambda_function.my_lambda_function.arn
+}
+
+output "processed_data_bucket_name" {
+  value = aws_s3_bucket.my_bucket.id
+}
+
+
