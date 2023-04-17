@@ -5,9 +5,14 @@ provider "aws" {
 
 variable "my_subnet" {
   type        = list(string)
-  default = ["subnet-012345678901", "subnet-012345678902"] #Update the subnet ids as per requirement 
+  default = ["subnet-012345678901", "subnet-012345678902"] 
 }
 
+variable "instance_count" {
+  type        = number
+  default     = 1 
+  description = "The number of EC2 instances to create"
+}
 data "aws_vpc" "default" {
   default = true
 }
@@ -41,23 +46,66 @@ resource "aws_api_gateway_integration" "my_integration" {
   uri  = "http://${aws_lb.my-lb.dns_name}"
 }
 
-resource "aws_lb" "my-lb" {
-  name               = "my-lb"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.my_security_group.id]
-  subnets            = data.aws_subnet_ids.subnets.ids 
+resource "aws_instance" "my_instance" {
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = "t2.micro"
+  count = 1
+  tags = {
+  Name = "my_instance-${count.index + 1}"
+  }   
 }
 
-resource "aws_lb_listener" "https" {
+
+# Create an application load balancer
+resource "aws_lb" "my-lb" {
+  name                       = "my-lb"
+  internal                   = false
+  load_balancer_type         = "application"
+  security_groups            = [aws_security_group.lbsg.id]
+  subnets                    = data.aws_subnet_ids.subnets.ids 
+  enable_deletion_protection = false
+
+  tags = {
+    Name     = "my-lb"
+  }
+}
+
+# Create a target group for the ec2 instances
+resource "aws_lb_target_group" "mytg" {
+  name     = "mytg"
+  port     = 443
+  protocol = "HTTP"
+  target_type = "instance"
+  vpc_id   = data.aws_vpc.default.id
+  health_check {
+    path = "/"
+  }
+}
+
+#Target group attachment 
+resource "aws_lb_target_group_attachment" "tgattachment" {
+  count            = length(aws_instance.my_instance.*.id) == 3 ? 3 : 0
+  target_group_arn = aws_lb_target_group.mytg.arn
+  target_id        = element(aws_instance.my_instance.*.id, count.index)
+  port             = 80
+}
+
+#Listener
+resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.my-lb.arn
   port              = "443"
-  protocol          = "HTTPS"
+  protocol          = "HTTP"
 
-  ssl_policy      = "ELBSecurityPolicy-2016-08"
   default_action {
-    type             = "forward"
-    }
+    type = "forward"
+    target_group_arn = aws_lb_target_group.mytg.arn
+  }
+}
+
+#Load balancer security group
+resource "aws_security_group" "lbsg" {
+  name        = "Dev Load Balancer"
+  vpc_id      = data.aws_vpc.default.id
 }
 
 resource "aws_ecs_cluster" "my_cluster" {
@@ -85,7 +133,7 @@ resource "aws_ecs_service" "my_service" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    security_groups = [aws_security_group.my_security_group.id]
+    security_groups = [aws_security_group.lbsg.id]
     subnets         = data.aws_subnet_ids.subnets.ids 
   }
 }
@@ -136,35 +184,6 @@ resource "aws_lambda_permission" "my_permission" {
   function_name = aws_lambda_function.my_lambda_function.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.my_rule.arn
-}
-
-resource "aws_security_group" "my_security_group" {
-  name_prefix = "my_security_group"
-}
-
-resource "aws_instance" "my_instance" {
-  ami           = "ami-0c55b159cbfafe1f0"
-  instance_type = "t2.micro"
-  vpc_security_group_ids = [aws_security_group.my_security_group.id]
-}
-
-
-
-resource "aws_elb" "myelb" {
-  name               = "myelb"
-  security_groups    = [aws_security_group.my_security_group.id]
-  subnets            = data.aws_subnet_ids.subnets.ids 
-  listener {
-    instance_port     = 80
-    instance_protocol = "HTTP"
-    lb_port           = 80
-    lb_protocol       = "HTTP"
-  }
-}
-
-resource "aws_elb_attachment" "my_attachment" {
-  elb    = aws_elb.myelb.id
-  instance = aws_instance.my_instance.id
 }
 
 
@@ -314,7 +333,7 @@ resource "aws_cloudwatch_event_target" "ecs_task_target" {
 }
 
 output "elb_dns_name" {
-  value = aws_elb.myelb.dns_name
+  value = aws_lb.my-lb.dns_name
 }
 
 output "kinesis_stream_name" {
