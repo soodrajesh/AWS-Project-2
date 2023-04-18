@@ -21,7 +21,7 @@ As per the requirements, we can design the AWS architecture as follows:
 
 **8. DynamoDB:** We can create a DynamoDB table to store the metadata for the events. This table will be used to track the status of each event and ensure that we meet the SLAs.
 
-**9. Multi-Region:** To make the system highly available and resilient, we can deploy the infrastructure in multiple regions. This ensures that the system can still ingest events even when one AWS region goes down.
+**9. Multi-Region:** To make the system highly available and resilient, we can deploy the infrastructure in multiple regions. Multi-region deployment of API Gateway and Kinesis Data Stream for efficient ingestion and distribution of events from North America and Western Europe regions.This ensures that the system can still ingest events even when one AWS region goes down.
 
 The request flow for this architecture will be as follows:
 
