@@ -25,7 +25,7 @@ As per the requirements, we can design the AWS architecture as follows:
 
 The request flow for this architecture will be as follows:
 
-1. A client sends an HTTPS request to the public endpoint of the API Gateway.
+1. A customer sends an HTTPS request to the public endpoint of the API Gateway.
 
 2. API Gateway receives the request and forwards it to the ELB.
 
