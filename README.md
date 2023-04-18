@@ -1,5 +1,5 @@
-# AWS-Project-2
-AWS-Project-2 using Terraform
+# AWS-Project
+AWS-Project using Terraform
 
 
 As per the requirements, we can design the AWS architecture as follows:
@@ -7,7 +7,7 @@ As per the requirements, we can design the AWS architecture as follows:
 
 **1. API Gateway:** We can create an API Gateway endpoint that can be accessed publicly without any authentication or authorization. This endpoint will receive the events and forward them to the backend for further processing.
 
-**2. Elastic Load Balancer (ELB):** We can use an ELB to distribute the traffic to multiple Amazon Elastic Compute Cloud (EC2) instances or containers in different regions. The ELB will also terminate the SSL/TLS connection, enabling the use of HTTPS to encrypt the traffic.****
+**2. Elastic Load Balancer (ELB):** We can use an ELB to distribute the traffic to multiple Amazon Elastic Compute Cloud (EC2) instances or containers in different regions. The ELB will also terminate the SSL/TLS connection, enabling the use of HTTPS to encrypt the traffic.
 
 **3. Kinesis:** We can use Amazon Kinesis as the data ingestion layer. The events received by the API Gateway will be forwarded to an Amazon Kinesis stream. We can configure the stream to handle up to 500 events per second at peak times.
 
