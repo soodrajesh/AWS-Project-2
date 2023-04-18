@@ -17,8 +17,3 @@ variable "account_id" {
   type        = number
   default = 01234567890
 }
-
-variable "acm_certificate_id" {
-  type        = string
-  default     = data.aws_acm_certificate.example.arn 
-}
