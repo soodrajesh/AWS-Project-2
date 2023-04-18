@@ -2,32 +2,26 @@
 
 ```mermaid
 graph TD
-  subgraph "Public Endpoint"
-    Endpoint["API Gateway + HTTPS/TLS 1.2"]
-  end
-  subgraph "Data Ingestion"
-    Endpoint --> ALB["Application Load Balancer"]
-    ALB --> ECS[ECS Cluster]
-    ECS --> Fargate["Fargate Task"]
-    subgraph "Availability Zones"
-      Fargate --> RDS[RDS Multi-AZ]
+    subgraph Internet
+        client[Client] --> API_Gateway[API Gateway]
     end
-  end
-  subgraph "Data Processing"
-    Fargate --> SQS["Amazon SQS"]
-    SQS --> Lambda["Lambda Function"]
-  end
-  subgraph "Data Storage"
-    RDS --> S3["S3 Bucket"]
-  end
-  subgraph "Consumers"
-    Lambda --> Kinesis["Amazon Kinesis"]
-    subgraph "Availability Zones"
-      Kinesis --> EC2["EC2 Instance"]
+    subgraph AWS
+        API_Gateway --> ELB[ELB]
+        ELB --> EC2_EC[EC2 Instance or Container]
+        EC2_EC --> Kinesis[Kinesis Stream]
+        Kinesis --> S3[S3 Bucket]
+        Kinesis --> SNS[SNS Topic]
+        SNS --> Lambda[Lambda Function]
+        SNS --> ECS_Fargate[ECS Fargate Task]
+        Lambda --> DynamoDB[DynamoDB Table]
+        Lambda --> S3
+        ECS_Fargate --> DynamoDB
+        ECS_Fargate --> S3
+        DynamoDB --> |Metadata| DynamoDB
+        S3 --> |Processed Data| Consumers[Consumers in eu-west-1]
     end
-  end
-  subgraph "Logging & Monitoring"
-    CloudTrail["AWS CloudTrail"]
-    CloudWatchLogs["CloudWatch Logs"]
-    CloudWatchMetrics["CloudWatch Metrics"]
-  end
+    subgraph Consumers
+        Consumers --> |Metadata| DynamoDB
+        Consumers --> |Processed Data| S3
+    end
+
