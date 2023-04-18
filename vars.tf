@@ -7,3 +7,13 @@ variable "instance_count" {
   type        = number
   default     = 1 
 }
+
+variable "region" {
+  type        = string
+  default = "us-west-2"
+}
+
+variable "account_id" {
+  type        = number
+  default = 01234567890
+}
