@@ -21,7 +21,6 @@ graph TD
         S3 --> |Processed Data| Consumers[Consumers in eu-west-1]
     end
     subgraph Consumers
-        Consumers --> |Metadata| DynamoDB
         Consumers --> |Processed Data| S3
     end
 
