@@ -3,16 +3,6 @@ provider "aws" {
   region = "us-west-2"
 }
 
-variable "my_subnet" {
-  type        = list(string)
-  default = ["subnet-012345678901", "subnet-012345678902"] 
-}
-
-variable "instance_count" {
-  type        = number
-  default     = 1 
-  description = "The number of EC2 instances to create"
-}
 data "aws_vpc" "default" {
   default = true
 }
@@ -25,6 +15,7 @@ data "aws_subnet" "subnets" {
   for_each = data.aws_subnet_ids.subnets.ids
   id       = each.value
 }
+
 
 resource "aws_api_gateway_rest_api" "my_api" {
   name = "my_api"
@@ -108,10 +99,12 @@ resource "aws_security_group" "lbsg" {
   vpc_id      = data.aws_vpc.default.id
 }
 
+# Create an ECS cluster to run the Fargate task
 resource "aws_ecs_cluster" "my_cluster" {
   name = "my_cluster"
 }
 
+# Create a task definition for the Fargate task
 resource "aws_ecs_task_definition" "my-task-def" {
   family                   = "my-task-def"
     container_definitions    = jsonencode([{
@@ -138,10 +131,127 @@ resource "aws_ecs_service" "my_service" {
   }
 }
 
+
+# Create policy for ECS Fargate task to run the batch processing job
+
+data "aws_iam_policy_document" "ecs_task_execution_policy" {
+  statement {
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+
+    effect = "Allow"
+    resources = [
+      "arn:aws:logs:${var.region}:${var.account_id}:log-group:/aws/ecs/fargate-events-processing:*"
+    ]
+
+  }
+
+  statement {
+    actions = [
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem"
+    ]
+
+    effect = "Allow"
+    resources = [
+      aws_dynamodb_table.my_table.arn
+    ]
+
+  }
+
+  statement {
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject"
+    ]
+
+    effect = "Allow"
+    resources = [
+      "${aws_s3_bucket.my_bucket.arn}/*"
+    ]
+
+  }
+}
+
+resource "aws_iam_role" "ecs_task_execution_role" {
+  name = "fargate-events-processing-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  inline_policy {
+    name   = "ecs_task_execution_policy"
+    policy = data.aws_iam_policy_document.ecs_task_execution_policy.json
+  }
+}
+
+
+#Create a Kinesis stream to receive the incoming events
 resource "aws_kinesis_stream" "my_stream" {
   name             = "my_stream"
   shard_count      = 1
   retention_period = 24
+}
+
+#Create an IAM policy to allow the Lambda function and ECS Fargate task to access the Kinesis stream, S3 bucket, and DynamoDB table
+resource "aws_iam_policy" "events_processing_policy" {
+  name   = "events-processing-policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Action    = [
+          "kinesis:DescribeStream",
+          "kinesis:GetRecords",
+          "kinesis:GetShardIterator",
+          "kinesis:ListShards",
+          "kinesis:PutRecord",
+          "kinesis:PutRecords"
+        ]
+        Resource  = aws_kinesis_stream.my_stream.arn
+      },
+      {
+        Effect    = "Allow"
+        Action    = [
+          "dynamodb:PutItem",
+          "dynamodb:Query",
+          "dynamodb:UpdateItem"
+        ]
+        Resource  = aws_dynamodb_table.my_table.arn
+      },
+      {
+        Effect    = "Allow"
+        Action    = [
+          "s3:GetObject",
+          "s3:ListBucket",
+          "s3:PutObject"
+        ]
+        Resource  = [
+          aws_s3_bucket.my_bucket.arn,
+          "${aws_s3_bucket.my_bucket.arn}/*"
+        ]
+      },
+      {
+        Effect    = "Allow"
+        Action    = "sns:Publish"
+        Resource  = aws_sns_topic.my_topic.arn
+      }
+    ]
+  })
 }
 
 
@@ -157,6 +267,7 @@ resource "aws_lambda_function" "my_lambda_function" {
   filename     = "real-time-consumer.zip"
 }
 
+#Create a CloudWatch event rule to trigger the ECS Fargate task
 resource "aws_cloudwatch_event_rule" "my_rule" {
   name                = "my_rule"
   description         = "Run my task at 3 am"
@@ -214,7 +325,7 @@ resource "aws_iam_role" "lambda_role" {
   })
 }
 
-
+# Create an S3 bucket to store the events
 resource "aws_s3_bucket" "my_bucket" {
   bucket = "my-bucket"
   acl    = "private"
@@ -224,6 +335,7 @@ resource "aws_s3_bucket" "my_bucket" {
   }
 }
 
+# Create an S3 bucket lifecycle rule to store the events
 resource "aws_s3_bucket_lifecycle_configuration" "bucket-config" {
   bucket = aws_s3_bucket.my_bucket.id
 
@@ -240,6 +352,31 @@ resource "aws_s3_bucket_lifecycle_configuration" "bucket-config" {
       }
     }
   }
+}
+
+# Allow the Lambda function to read from the S3 bucket
+resource "aws_s3_bucket_policy" "lambda_bucket_policy" {
+  bucket = aws_s3_bucket.my_bucket.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = ""
+        }
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          aws_s3_bucket.my_bucket.arn,
+          "${aws_s3_bucket.my_bucket.arn}/*"
+        ]
+      }
+    ]
+  })
 }
 
 
@@ -314,6 +451,34 @@ resource "aws_iam_policy" "ecs_task_policy" {
 resource "aws_iam_role_policy_attachment" "ecs_task_policy_attachment" {
   policy_arn = aws_iam_policy.ecs_task_policy.arn
   role       = aws_iam_role.ecs_task_role.name
+}
+
+# Allow the ECS task to write to the DynamoDB table
+resource "aws_iam_role_policy" "fargate_dynamodb_policy" {
+  name = "fargate-dynamodb-policy"
+  role = aws_iam_role.ecs_task_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:BatchGetItem",
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchWriteItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem"
+        ]
+        Resource = [
+          aws_dynamodb_table.my_table.arn
+        ]
+      }
+    ]
+  })
 }
 
 
