@@ -7,7 +7,7 @@ graph TD
     end
     subgraph AWS
         API_Gateway --> ELB[ELB]
-        ELB --> EC2_EC[EC2 Instance or Container]
+        ELB --> EC2_EC[ECS]
         EC2_EC --> Kinesis[Kinesis Stream]
         Kinesis --> S3[S3 Bucket]
         Kinesis --> SNS[SNS Topic]
